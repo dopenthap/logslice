@@ -1,45 +1,69 @@
-"""Filter log lines by regex pattern and/or time range."""
+"""Line filtering utilities for logslice."""
 
-from datetime import datetime
-from typing import Iterable, Iterator, Optional
+from typing import Iterable, Iterator
 
-from logslice.parser import matches_pattern, parse_line
+from logslice.parser import extract_timestamp, matches_pattern
+from logslice.sampler import sample_every_nth, sample_lines
 
 
 def filter_lines(
     lines: Iterable[str],
-    pattern: Optional[str] = None,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
-    ignore_case: bool = False,
+    pattern: str | None = None,
+    start: object = None,
+    end: object = None,
+    invert: bool = False,
+    sample_rate: float | None = None,
+    sample_nth: int | None = None,
+    sample_seed: int | None = None,
 ) -> Iterator[str]:
-    """
-    Yield log lines that satisfy all provided filters.
+    """Filter log lines by pattern, time range, and optional sampling.
 
     Args:
-        lines:       Iterable of raw log line strings.
-        pattern:     Optional regex; only matching lines are kept.
-        start:       Optional lower bound for timestamp filtering (inclusive).
-        end:         Optional upper bound for timestamp filtering (inclusive).
-        ignore_case: Whether regex matching is case-insensitive.
+        lines: Raw log lines to process.
+        pattern: Optional regex pattern; only matching lines are kept.
+        start: Optional start datetime; lines before this are dropped.
+        end: Optional end datetime; lines after this are dropped.
+        invert: When True, keep lines that do NOT match the pattern.
+        sample_rate: If set, randomly sample at this rate after filtering.
+        sample_nth: If set, keep every nth line after filtering.
+        sample_seed: Seed for the random sampler.
+
+    Yields:
+        Lines that pass all active filters.
     """
+    filtered: Iterable[str] = _apply_filters(lines, pattern, start, end, invert)
+
+    if sample_nth is not None:
+        filtered = sample_every_nth(filtered, n=sample_nth)
+    elif sample_rate is not None:
+        filtered = sample_lines(filtered, rate=sample_rate, seed=sample_seed)
+
+    yield from filtered
+
+
+def _apply_filters(
+    lines: Iterable[str],
+    pattern: str | None,
+    start: object,
+    end: object,
+    invert: bool,
+) -> Iterator[str]:
     for line in lines:
-        if not line.strip():
-            continue
+        stripped = line.rstrip("\n")
 
-        parsed = parse_line(line)
-
-        # Regex filter
         if pattern is not None:
-            if not matches_pattern(parsed["raw"], pattern, ignore_case):
+            matched = matches_pattern(stripped, pattern)
+            if invert and matched:
+                continue
+            if not invert and not matched:
                 continue
 
-        # Time-range filter — only applied when the line has a timestamp
-        ts = parsed["timestamp"]
-        if (start is not None or end is not None) and ts is not None:
-            if start is not None and ts < start:
-                continue
-            if end is not None and ts > end:
-                continue
+        if start is not None or end is not None:
+            ts = extract_timestamp(stripped)
+            if ts is not None:
+                if start is not None and ts < start:
+                    continue
+                if end is not None and ts > end:
+                    continue
 
-        yield parsed["raw"]
+        yield line
