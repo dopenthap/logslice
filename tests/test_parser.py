@@ -27,6 +27,14 @@ class TestExtractTimestamp:
         ts = extract_timestamp(line)
         assert ts == datetime(2024, 3, 15, 10, 20, 30)
 
+    def test_empty_string_returns_none(self):
+        assert extract_timestamp("") is None
+
+    def test_timestamp_only(self):
+        line = "2024-03-15T12:34:56"
+        ts = extract_timestamp(line)
+        assert ts == datetime(2024, 3, 15, 12, 34, 56)
+
 
 class TestMatchesPattern:
     def test_simple_match(self):
@@ -55,3 +63,11 @@ class TestParseLine:
     def test_strips_newline(self):
         result = parse_line("hello\n")
         assert result["raw"] == "hello"
+
+    def test_strips_carriage_return(self):
+        result = parse_line("hello\r\n")
+        assert result["raw"] == "hello"
+
+    def test_timestamp_none_when_missing(self):
+        result = parse_line("no timestamp here\n")
+        assert result["timestamp"] is None
